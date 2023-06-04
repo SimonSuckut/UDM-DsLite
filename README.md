@@ -14,7 +14,7 @@ The Dual Stack Light specification requires to request DHCPv6 option 64 which re
 The last step is to hook 2 applications, namely linkcheck and dpinger which are used by the Unifi Network application to perform speedtests and determine whether the ISP connection is online and working.
 
 ## Contributing
-Feel free to create pull-request. I am neither a networking nor a linux kernel export. You are welcome to make suggestions or improvements.
+Feel free to create pull-request. I am neither a networking nor a linux kernel expert. You are welcome to make suggestions or improvements.
 
 ## License
 The code is released under the GPLv2 license. See COPYING.txt.
