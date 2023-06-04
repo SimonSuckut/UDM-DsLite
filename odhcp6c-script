@@ -1,0 +1,9 @@
+#!/bin/bash
+
+if [ ! -z "$AFTR" ]; then
+    AFTR_IP=$(host -t AAAA $AFTR $RA_DNS | awk '/has IPv6 address/ { print $5; exit }')
+    echo $AFTR > /var/run/aftr-addr-$1
+    echo $AFTR_IP > /var/run/aftr-ip-$1
+fi
+
+/usr/share/ubios-udapi-server/ubios-odhcp6c-script $@

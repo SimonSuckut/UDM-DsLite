@@ -1,0 +1,11 @@
+#!/bin/bash
+
+if [ -f /var/run/dslite_interface ]; then
+    DSLITE_IF=$(cat /var/run/dslite_interface)
+
+    export LD_PRELOAD=/data/ds-lite/bindToInterface.so
+    export BIND_EXCLUDE=127.0.0.1
+    export BIND_INTERFACE=$DSLITE_IF
+fi
+
+exec /usr/bin/linkcheck

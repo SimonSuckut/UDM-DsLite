@@ -1,0 +1,43 @@
+#!/bin/sh
+
+IF=${IFNAME}
+TUN_IF="dslite_$IF"
+
+rm -f /var/run/dslite_interface
+
+### linkcheck hook
+systemctl restart linkcheck
+
+### Iptables
+IF_UPPER=$(echo $IF | awk '{print toupper($0)}')
+
+## Mangle
+iptables -t nat -D POSTROUTING $RULE_NUM -s 192.0.0.2/32 -o $TUN_IF -j SNAT --to-source 10.254.254.1
+
+JUMP_CHAIN="FORWARD_JUMP_DSLITE_${IF_UPPER}"
+MSS_CHAIN="FORWARD_TCPMSS_DSLITE_${IF_UPPER}"
+
+iptables -t mangle -D FORWARD -i $TUN_IF -j $JUMP_CHAIN
+iptables -t mangle -D FORWARD -o $TUN_IF -j $JUMP_CHAIN
+
+iptables -t mangle -F $JUMP_CHAIN
+iptables -t mangle -F $MSS_CHAIN
+
+iptables -t mangle -X $JUMP_CHAIN
+iptables -t mangle -X $MSS_CHAIN
+
+## WAN
+iptables -D FORWARD -i $TUN_IF -j FORWARD_IN_DSLITE_${IF_UPPER}
+iptables -D FORWARD -o $TUN_IF -j FORWARD_OUT_DSLITE_${IF_UPPER}
+iptables -D INPUT -i $TUN_IF -j INPUT_DSLITE_${IF_UPPER}
+
+iptables -F FORWARD_IN_DSLITE_${IF_UPPER}
+iptables -F FORWARD_OUT_DSLITE_${IF_UPPER}
+iptables -F INPUT_DSLITE_${IF_UPPER}
+
+iptables -X FORWARD_IN_DSLITE_${IF_UPPER}
+iptables -X FORWARD_OUT_DSLITE_${IF_UPPER}
+iptables -X INPUT_DSLITE_${IF_UPPER}
+
+### Tunnel Interface
+ip -6 tunnel del $TUN_IF >/dev/null 2>&1

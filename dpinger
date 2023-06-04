@@ -1,0 +1,28 @@
+#!/bin/bash
+
+ORIG_ARGS=$@
+IS_DSLITE_IF=0
+
+if [ -f /var/run/dslite_interface ]; then
+    DSLITE_IF=$(cat /var/run/dslite_interface)
+    ORIG_IF=${DSLITE_IF#"dslite_"} 
+
+    ARGS=()
+    
+    while [ "$#" -gt 0 ]; do
+         case "$1" in
+            $ORIG_IF) IS_DSLITE_IF=1; ARGS+=($DSLITE_IF); shift;;
+            -B) shift; shift;;
+            *) ARGS+=("$1"); shift;;
+        esac
+    done
+    
+fi
+
+echo "${ARGS[@]}"
+
+if [ $IS_DSLITE_IF -eq 1 ]; then
+	/usr/bin/dpinger_hooked ${ARGS[@]}
+else
+	/usr/bin/dpinger_hooked ${ORIG_ARGS[@]}
+fi

@@ -1,0 +1,96 @@
+#!/bin/sh
+
+IF=${IFNAME}
+TUN_IF="dslite_$IF"
+
+PATH=$PATH:/usr/bin
+
+echo $TUN_IF > /var/run/dslite_interface
+
+LOCAL=""
+COUNT=0
+while [ -z "$LOCAL" ]; do
+    sleep 5
+    LOCAL=$(ip -6 addr show $IF | grep inet6 | awk -F '[ \t]+|/' '{print $3}' | grep -v '^\(::1\|fe80\)' | head -n1)
+        
+    COUNT=$((COUNT + 1))
+    if [ $COUNT -ge 120 ]; then
+        touch /tmp/v6up_failed
+        exit 1
+    fi
+done
+
+AFTR_IP=$(cat /var/run/aftr-ip-$IF)
+
+modprobe ip6_tunnel
+ip -6 tunnel del $TUN_IF >/dev/null 2>&1
+ip -6 tunnel add $TUN_IF mode ipip6 local $LOCAL remote $AFTR_IP encaplimit none
+ip link set $TUN_IF up
+ip address add 192.0.0.2/29 peer 192.0.0.1/29 dev $TUN_IF
+ip route del default
+ip route add 0.0.0.0/0 via 192.0.0.1
+#vtysh -c 'configure terminal' -c "no ip route 0.0.0.0/0 $IF" -c 'ip route 0.0.0.0/0 192.0.0.1'
+
+RULE_NUM=$(iptables -t nat -S POSTROUTING | wc -l)                  
+RULE_NUM=$(expr $RULE_NUM - 1)
+
+## According to the RFC specification the local tunnel endpoint's ip address 192.0.0.2
+# can not be used for WAN access (the router if self does not have WAN access when using
+# this address). This is why you should NOT do a NAT on your router.
+# As a workaround we do a Source NAT for the router's own packages.
+iptables -t nat -I POSTROUTING $RULE_NUM -s 192.0.0.2/32 -o $TUN_IF -j SNAT --to-source 10.254.254.1
+
+### Iptables Hooks
+IF_UPPER=$(echo $IF | awk '{print toupper($0)}')
+
+## Mangle
+IF_MTU=$(cat /sys/class/net/$IF/mtu)
+
+JUMP_CHAIN="FORWARD_JUMP_DSLITE_${IF_UPPER}"
+MSS_CHAIN="FORWARD_TCPMSS_DSLITE_${IF_UPPER}"
+
+iptables -t mangle -N $JUMP_CHAIN
+iptables -t mangle -N $MSS_CHAIN
+
+iptables -t mangle -A $JUMP_CHAIN -j $MSS_CHAIN
+iptables -t mangle -A $MSS_CHAIN -p tcp -m tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss $((IF_MTU - 80))
+
+iptables -t mangle -I FORWARD -i $TUN_IF -j $JUMP_CHAIN
+iptables -t mangle -I FORWARD -o $TUN_IF -j $JUMP_CHAIN
+
+## WAN rules
+iptables -N FORWARD_IN_DSLITE_${IF_UPPER}
+iptables -N FORWARD_OUT_DSLITE_${IF_UPPER}
+iptables -N INPUT_DSLITE_${IF_UPPER}
+
+iptables -A FORWARD_IN_DSLITE_${IF_UPPER} -j UBIOS_WAN_IN_USER
+iptables -A FORWARD_OUT_DSLITE_${IF_UPPER} -j UBIOS_WAN_OUT_USER
+iptables -A INPUT_DSLITE_${IF_UPPER} -j UBIOS_WAN_LOCAL_USER
+
+rule_num()
+{
+    local FORWARD_RULES=$(iptables -L $1 --line-numbers -n)
+    local RULE_NUM=""
+
+    echo "$FORWARD_RULES" | while IFS= read -r LINE; do
+        local TARGET=$(echo $LINE | awk '{print $2}')
+        if [ $TARGET = "$2" ]; then
+            RULE_NUM=$(echo $LINE | awk '{print $1}')
+            echo $RULE_NUM
+            return
+        fi
+    done
+}
+
+INSERT_POS=$(rule_num FORWARD UBIOS_FORWARD_JUMP)
+iptables -I FORWARD $INSERT_POS -i $TUN_IF -j FORWARD_IN_DSLITE_${IF_UPPER}
+iptables -I FORWARD $INSERT_POS -o $TUN_IF -j FORWARD_OUT_DSLITE_${IF_UPPER}
+
+INSERT_POS=$(rule_num INPUT UBIOS_INPUT_JUMP)
+iptables -I INPUT $INSERT_POS -i $TUN_IF -j INPUT_DSLITE_${IF_UPPER}
+
+### linkcheck hook
+systemctl restart linkcheck
+
+# IPv4 default route
+#vtysh -c 'configure terminal' -c "no ip route 0.0.0.0/0 $IF" -c 'ip route 0.0.0.0/0 192.0.0.1' 

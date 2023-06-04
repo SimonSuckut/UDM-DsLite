@@ -1,0 +1,29 @@
+#!/bin/bash
+
+echo $@ > /var/run/test
+
+WRAPPER_SCRIPT='/data/ds-lite/odhcp6c-script'
+
+ORIG_ARGS=$@
+ARGS=()
+IS_PPP=0
+HAS_OPTIONS=0
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        ppp*) IS_PPP=1; ARGS+=($1); shift;;
+        -r) HAS_OPTIONS=1; ARGS+=($1); shift; ARGS+=("$1,64"); shift;;
+        -s) ARGS+=($1); shift; ARGS+=($WRAPPER_SCRIPT); shift;; 
+        *) ARGS+=("$1"); shift;;
+    esac
+done
+
+if [ $IS_PPP -eq 1 ]; then
+    if [ $HAS_OPTIONS -eq 0 ]; then
+        ARGS+=("-r")
+        ARGS+=("64")
+    fi
+    /usr/sbin/odhcp6c_hooked ${ARGS[@]}
+else
+    /usr/sbin/odhcp6c_hooked $ORIG_ARGS
+fi
